@@ -153,3 +153,98 @@ int main(int argc, char* argv[])
 
     return 0;
 }
+
+
+#ifndef MACROS_API_WIN_H
+#define MACROS_API_WIN_H
+
+#include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+/* ================================================================
+   MACROS ALLOCATION MEMOIRE (VirtualAlloc / VirtualFree)
+   ================================================================ */
+
+/* Allocation lecture/ecriture (donnees classiques) */
+#define ALLOCWR(size_byte) \
+    VirtualAlloc(NULL, (size_byte), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+
+/* Allocation lecture/ecriture/execution (ex: shellcode, JIT, buffers executables) */
+#define ALLOCRWX(size_byte) \
+    VirtualAlloc(NULL, (size_byte), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+
+/* Liberation memoire allouee avec VirtualAlloc (met le pointeur a NULL) */
+#define FREEMEM(ptr) \
+    do { if (ptr) { VirtualFree((ptr), 0, MEM_RELEASE); (ptr) = NULL; } } while (0)
+
+
+/* ================================================================
+   MACROS HANDLES
+   ================================================================ */
+
+/* Fermeture securisee d'un HANDLE : evite les double-close et les handles fantomes */
+#define SAFE_CLOSE(h) \
+    do { if ((h) != NULL && (h) != INVALID_HANDLE_VALUE) { CloseHandle(h); (h) = NULL; } } while (0)
+
+
+/* ================================================================
+   MACROS VERIFICATION / ERREURS
+   ================================================================ */
+
+/* Quitte le programme si la condition est fausse, avec message + code d'erreur Windows */
+#define CHECK(cond, msg) \
+    do { \
+        if (!(cond)) { \
+            fprintf(stderr, "[ERREUR] %s (%s:%d) - code %lu\n", (msg), __FILE__, __LINE__, GetLastError()); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while (0)
+
+/* Affiche le message d'erreur Windows lisible correspondant a GetLastError() */
+static inline void PrintLastError(const char* contexte)
+{
+    DWORD err = GetLastError();
+    LPSTR msg = NULL;
+
+    FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, err, 0, (LPSTR)&msg, 0, NULL);
+
+    fprintf(stderr, "[%s] Erreur %lu : %s\n", contexte, err, msg ? msg : "(message indisponible)");
+
+    if (msg) LocalFree(msg);
+}
+
+
+/* ================================================================
+   MACROS DEBUG
+   ================================================================ */
+
+#ifdef _DEBUG
+#define DBG(fmt, ...) fprintf(stderr, "[DBG %s:%d] " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
+#else
+#define DBG(fmt, ...) do {} while (0)
+#endif
+
+
+/* ================================================================
+   MACROS PROTECTION MEMOIRE (VirtualProtect)
+   ================================================================ */
+
+/* Passe une zone memoire en lecture/execution seule
+   (typiquement apres y avoir ecrit du code dans une zone RW) */
+#define PROTECT_RX(ptr, size, oldProtectVar) \
+    VirtualProtect((ptr), (size), PAGE_EXECUTE_READ, &(oldProtectVar))
+
+#define PROTECT_RW(ptr, size, oldProtectVar) \
+    VirtualProtect((ptr), (size), PAGE_READWRITE, &(oldProtectVar))
+
+
+/* ================================================================
+   MACROS UTILITAIRES GENERALES
+   ================================================================ */
+
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+
+#endif /* MACROS_API_WIN_H */
