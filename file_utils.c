@@ -248,3 +248,178 @@ static inline void PrintLastError(const char* contexte)
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #endif /* MACROS_API_WIN_H */
+
+/* ============================================================
+   processus.c
+   Listing et manipulation de processus Windows (API Win32)
+   ============================================================ */
+
+#include <windows.h>
+#include <tlhelp32.h>
+#include <stdio.h>
+
+/* ------------------------------------------------------------
+   Liste tous les processus en cours avec leur PID
+   ------------------------------------------------------------ */
+void ListerProcessus(void)
+{
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) {
+        printf("Erreur CreateToolhelp32Snapshot : %lu\n", GetLastError());
+        return;
+    }
+
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32); /* OBLIGATOIRE avant Process32First, sinon echec garanti */
+
+    if (Process32First(hSnapshot, &pe)) {
+        do {
+            printf("PID: %-6lu  Threads: %-4lu  Parent: %-6lu  %s\n",
+                   pe.th32ProcessID, pe.cntThreads, pe.th32ParentProcessID, pe.szExeFile);
+        } while (Process32Next(hSnapshot, &pe));
+    }
+
+    CloseHandle(hSnapshot);
+}
+
+/* ------------------------------------------------------------
+   Trouve le PID d'un processus a partir de son nom (ex: "notepad.exe")
+   Retourne 0 si non trouve.
+   ------------------------------------------------------------ */
+DWORD TrouverPID(const char* nomProcessus)
+{
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE)
+        return 0;
+
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+    DWORD pid = 0;
+
+    if (Process32First(hSnapshot, &pe)) {
+        do {
+            if (_stricmp(pe.szExeFile, nomProcessus) == 0) {
+                pid = pe.th32ProcessID;
+                break;
+            }
+        } while (Process32Next(hSnapshot, &pe));
+    }
+
+    CloseHandle(hSnapshot);
+    return pid;
+}
+
+/* ------------------------------------------------------------
+   Recupere le chemin complet de l'executable d'un processus.
+   Necessite seulement PROCESS_QUERY_LIMITED_INFORMATION
+   (pas besoin de droits eleves juste pour lire le chemin).
+   ------------------------------------------------------------ */
+BOOL ObtenirCheminProcessus(DWORD pid, char* buffer, DWORD tailleBuffer)
+{
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess)
+        return FALSE;
+
+    DWORD taille = tailleBuffer;
+    BOOL ok = QueryFullProcessImageNameA(hProcess, 0, buffer, &taille);
+
+    CloseHandle(hProcess);
+    return ok;
+}
+
+/* ------------------------------------------------------------
+   Termine un processus par son PID
+   ------------------------------------------------------------ */
+BOOL TerminerProcessus(DWORD pid)
+{
+    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+    if (!hProcess) {
+        printf("Impossible d'ouvrir le processus %lu : %lu\n", pid, GetLastError());
+        return FALSE;
+    }
+
+    BOOL ok = TerminateProcess(hProcess, 1);
+    CloseHandle(hProcess);
+    return ok;
+}
+
+/* ------------------------------------------------------------
+   Suspend tous les threads d'un processus (pause)
+   ------------------------------------------------------------ */
+void SuspendreProcessus(DWORD pid)
+{
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE)
+        return;
+
+    THREADENTRY32 te;
+    te.dwSize = sizeof(THREADENTRY32);
+
+    if (Thread32First(hSnapshot, &te)) {
+        do {
+            if (te.th32OwnerProcessID == pid) {
+                HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID);
+                if (hThread) {
+                    SuspendThread(hThread);
+                    CloseHandle(hThread);
+                }
+            }
+        } while (Thread32Next(hSnapshot, &te));
+    }
+
+    CloseHandle(hSnapshot);
+}
+
+/* ------------------------------------------------------------
+   Reprend tous les threads d'un processus
+   ------------------------------------------------------------ */
+void ReprendreProcessus(DWORD pid)
+{
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE)
+        return;
+
+    THREADENTRY32 te;
+    te.dwSize = sizeof(THREADENTRY32);
+
+    if (Thread32First(hSnapshot, &te)) {
+        do {
+            if (te.th32OwnerProcessID == pid) {
+                HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID);
+                if (hThread) {
+                    ResumeThread(hThread);
+                    CloseHandle(hThread);
+                }
+            }
+        } while (Thread32Next(hSnapshot, &te));
+    }
+
+    CloseHandle(hSnapshot);
+}
+
+/* ============================================================
+   DEMO
+   ============================================================ */
+int main(void)
+{
+    printf("=== Liste des processus ===\n");
+    ListerProcessus();
+
+    DWORD pid = TrouverPID("notepad.exe");
+    if (pid) {
+        char chemin[MAX_PATH] = {0};
+        if (ObtenirCheminProcessus(pid, chemin, MAX_PATH))
+            printf("\nnotepad.exe (PID %lu) : %s\n", pid, chemin);
+
+        /* Decommenter pour tester :
+        SuspendreProcessus(pid);
+        Sleep(2000);
+        ReprendreProcessus(pid);
+        TerminerProcessus(pid);
+        */
+    } else {
+        printf("\nnotepad.exe non trouve.\n");
+    }
+
+    return 0;
+}
