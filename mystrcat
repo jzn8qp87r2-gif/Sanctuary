@@ -1,0 +1,98 @@
+; ============================================================
+; strcat_s - implémentation pure x86 / MASM
+; Convention : stdcall, gestion manuelle de ebp
+;
+; Prototype équivalent :
+;   errno_t strcat_s(char *dest, size_t destsz, const char *src)
+;
+; Paramètres (empilés dest, destsz, src -> droite vers gauche) :
+;   [ebp+8]  = dest    (buffer destination)
+;   [ebp+12] = destsz  (taille totale du buffer dest, en octets)
+;   [ebp+16] = src     (chaîne source à concaténer)
+;
+; Retour (eax) :
+;   0   = succès
+;   22  = EINVAL  (dest, src NULL, ou destsz == 0)
+;   34  = ERANGE  (la concaténation ne tient pas dans dest)
+;
+; Nettoyage de pile : callee (ret 12), comme tout stdcall.
+; ============================================================
+
+.386
+.model flat, stdcall
+
+EINVAL  EQU 22
+ERANGE  EQU 34
+
+.code
+
+strcat_s PROC
+    push    ebp
+    mov     ebp, esp
+    push    esi
+    push    edi
+
+    ; --- validation minimale des paramètres ---
+    mov     edi, [ebp+8]        ; edi = dest
+    cmp     edi, 0
+    je      err_einval
+
+    mov     esi, [ebp+16]       ; esi = src
+    cmp     esi, 0
+    je      err_einval
+
+    mov     ecx, [ebp+12]       ; ecx = destsz
+    cmp     ecx, 0
+    je      err_einval
+
+    ; --- recherche du \0 de dest, sans dépasser destsz ---
+find_end:
+    cmp     byte ptr [edi], 0
+    je      found_end
+    inc     edi
+    dec     ecx
+    cmp     ecx, 0
+    je      err_erange          ; dest n'est pas terminé dans destsz -> non conforme
+    jmp     find_end
+
+found_end:
+    ; edi -> \0 de dest, ecx = octets restants (\0 inclus)
+
+    ; --- copie de src à la suite de dest ---
+copy_loop:
+    mov     al, [esi]
+    cmp     al, 0
+    je      copy_done
+
+    cmp     ecx, 1              ; il faut garder 1 octet pour le \0 final
+    jle     err_erange
+
+    mov     [edi], al
+    inc     edi
+    inc     esi
+    dec     ecx
+    jmp     copy_loop
+
+copy_done:
+    mov     byte ptr [edi], 0   ; terminaison finale
+    xor     eax, eax            ; retour = 0 (succès)
+    jmp     epilogue
+
+err_erange:
+    ; strcat_s standard : en cas de dépassement, dest[0] = '\0'
+    mov     edi, [ebp+8]
+    mov     byte ptr [edi], 0
+    mov     eax, ERANGE
+    jmp     epilogue
+
+err_einval:
+    mov     eax, EINVAL
+
+epilogue:
+    pop     edi
+    pop     esi
+    pop     ebp
+    ret     12                  ; stdcall : nettoie les 3 arguments (4*3)
+strcat_s ENDP
+
+END
