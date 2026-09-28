@@ -1,0 +1,47 @@
+; ============================================================
+; strlen - implémentation pure x86 / MASM
+; Convention : stdcall, gestion manuelle de ebp
+;
+; Prototype équivalent :
+;   size_t strlen(const char *str)
+;
+; Paramètre :
+;   [ebp+8]  = str  (chaîne dont on veut la longueur)
+;
+; Retour (eax) :
+;   longueur de la chaîne, sans compter le \0
+;   0 si str est NULL (choix simple, pas de comportement indéfini)
+;
+; Nettoyage de pile : callee (ret 4), comme tout stdcall.
+; ============================================================
+
+.386
+.model flat, stdcall
+
+.code
+
+strlen PROC
+    push    ebp
+    mov     ebp, esp
+    push    edi
+
+    mov     edi, [ebp+8]        ; edi = str
+    xor     eax, eax            ; eax = compteur de longueur
+
+    cmp     edi, 0
+    je      done                ; str NULL -> retourne 0
+
+count_loop:
+    cmp     byte ptr [edi], 0
+    je      done
+    inc     edi
+    inc     eax
+    jmp     count_loop
+
+done:
+    pop     edi
+    pop     ebp
+    ret     4                   ; stdcall : nettoie l'unique argument
+strlen ENDP
+
+END
