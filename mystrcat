@@ -96,3 +96,18 @@ epilogue:
 strcat_s ENDP
 
 END
+
+
+;    invoke lstrlenA, addr destination   ; eax = longueur actuelle de destination
+;    lea    edi, destination
+;    add    edi, eax                     ; edi -> pointe sur le '\0' final de destination
+
+;    lea    esi, source                  ; esi -> debut de la source a coller
+
+;copie_boucle:
+;    mov    al, [esi]
+;    mov    [edi], al
+;    inc    esi
+;    inc    edi
+;    test   al, al
+;    jnz    copie_boucle                 ; on copie l'octet AVANT de tester -> le '\0' est copie aussi
